@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#111111">
+<title>SALE SCANNER</title>
+<style>
+  :root{
+    --bg:#111; --panel:#1c1c1e; --line:#2c2c2e; --text:#f2f2f2; --sub:#9a9a9f;
+    --accent:#e8c66a; --ok:#4cd17a; --warn:#ff9f43; --ng:#ff5a5a;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif}
+  body{padding:calc(env(safe-area-inset-top) + 8px) 12px calc(env(safe-area-inset-bottom) + 24px)}
+  header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+  h1{font-size:17px;letter-spacing:.12em;margin:0;font-weight:700}
+  .chip{font-size:11px;color:var(--sub);background:var(--panel);border:1px solid var(--line);
+    padding:5px 10px;border-radius:99px;max-width:62vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chip.ok{color:var(--ok);border-color:#24502f}
+  button,.btn{appearance:none;border:1px solid var(--line);background:var(--panel);color:var(--text);
+    font-size:15px;font-weight:600;padding:12px 10px;border-radius:12px;cursor:pointer;text-align:center;
+    display:flex;align-items:center;justify-content:center;gap:6px}
+  button:active,.btn:active{opacity:.7}
+  button.primary{background:var(--accent);color:#111;border-color:var(--accent)}
+  button:disabled{opacity:.4}
+  .row{display:grid;gap:8px;margin-top:8px}
+  .r3{grid-template-columns:1.4fr 1fr 1fr}
+  .r2{grid-template-columns:1fr 1fr}
+  input[type=file]{display:none}
+
+  /* camera */
+  #cam{position:relative;width:100%;aspect-ratio:4/3;background:#000;border-radius:16px;overflow:hidden}
+  #cam video{width:100%;height:100%;object-fit:cover;display:block}
+  #guide{position:absolute;left:6%;right:6%;top:30%;height:40%;border:2px solid rgba(255,255,255,.85);
+    border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.35);pointer-events:none;transition:border-color .2s}
+  #guide.hit{border-color:var(--ok)}
+  #camMsg{position:absolute;left:0;right:0;bottom:10px;text-align:center;font-size:13px;color:#fff;
+    text-shadow:0 1px 3px #000;padding:0 10px}
+  #camIdle{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    color:var(--sub);font-size:14px;gap:6px;text-align:center;padding:20px}
+
+  /* result */
+  #loadMsg.err{color:var(--ng)}
+  #result{margin-top:12px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;display:none}
+  #result.show{display:block}
+  .rate{font-size:64px;font-weight:800;line-height:1;color:var(--accent);letter-spacing:-.02em}
+  .rate small{font-size:24px;font-weight:700;margin-left:4px}
+  .price{margin-top:6px;font-size:16px}
+  .price s{color:var(--sub);margin-right:8px}
+  .price b{font-size:22px}
+  .meta{margin-top:10px;font-size:13px;color:var(--sub);line-height:1.6}
+  .meta .code{color:var(--text);font-family:ui-monospace,Menlo,monospace;font-size:14px}
+  .tag{display:inline-block;font-size:12px;font-weight:700;padding:3px 8px;border-radius:6px;margin:8px 6px 0 0}
+  .tag.warn{background:#3a2a12;color:var(--warn)}
+  .tag.info{background:#1f2a3a;color:#7fb2ff}
+  .none{font-size:22px;font-weight:800;color:var(--ng)}
+  .colors{margin-top:12px;border-top:1px solid var(--line)}
+  .crow{display:flex;justify-content:space-between;align-items:center;padding:10px 2px;border-bottom:1px solid var(--line);font-size:15px}
+  .crow .r{font-weight:800;color:var(--accent);font-size:20px}
+  .crow.sel{background:#2a2612}
+  .raw{margin-top:10px;font-size:11px;color:#666;word-break:break-all;font-family:ui-monospace,Menlo,monospace}
+
+  /* search & history */
+  section{margin-top:18px}
+  section h2{font-size:12px;color:var(--sub);letter-spacing:.1em;margin:0 0 8px;font-weight:600}
+  #q{width:100%;font-size:17px;padding:12px 14px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel);color:var(--text);text-transform:uppercase}
+  .list .crow{cursor:pointer}
+  .list .nm{font-size:12px;color:var(--sub);display:block;margin-top:2px}
+  .empty{color:#666;font-size:13px;padding:8px 2px}
+  #toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 20px);transform:translateX(-50%);
+    background:#333;color:#fff;padding:10px 16px;border-radius:99px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:9}
+  #toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SALE SCANNER</h1>
+  <button class="chip" id="dataChip" type="button">データ未読込</button>
+</header>
+<input type="file" id="xlsx">
+<div id="loadCard">
+  <button class="primary" id="btnLoad" type="button" style="width:100%;padding:16px">📄 Excelを読み込む</button>
+  <div id="loadMsg" class="meta" style="margin:6px 2px 10px">「ファイル」アプリやダウンロードからSALEのExcelを選んでください</div>
+</div>
+
+<div id="cam">
+  <video id="video" playsinline muted autoplay></video>
+  <div id="guide"></div>
+  <div id="camIdle">
+    <div style="font-size:34px">📷</div>
+    <div>「カメラ開始」を押して<br>タグの品番を枠に入れてください</div>
+  </div>
+  <div id="camMsg"></div>
+</div>
+
+<div class="row r3">
+  <button class="primary" id="btnCam">カメラ開始</button>
+  <button id="btnTorch" disabled>ライト</button>
+  <label class="btn" for="photo">写真で読取</label>
+</div>
+<input type="file" id="photo" accept="image/*" capture="environment">
+
+<div id="result"></div>
+
+<section>
+  <h2>品番で手動検索</h2>
+  <input id="q" type="search" inputmode="text" autocomplete="off" autocorrect="off" spellcheck="false"
+    placeholder="例：KJ7025 / 0447 / TEE">
+  <div class="list" id="qList"></div>
+</section>
+
+<section>
+  <h2>履歴</h2>
+  <div class="list" id="hist"><div class="empty">まだありません</div></div>
+</section>
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<!-- ============ CORE（データ解析・照合ロジック） ============ -->
+<script id="core">
+/* OCRで混同しやすい文字を同一視して比較する（品番・OCR結果の両方に同じ変換をかける） */
+const CONF = {O:'0',Q:'0',D:'0',I:'1',L:'1',S:'5',B:'8',Z:'2',G:'6'};
+function canon(s){
+  return String(s ?? '').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/[OQDILSBZG]/g, c => CONF[c]);
+}
+function normColor(v){
+  let s = String(v ?? '').trim().toUpperCase();
+  if (/^\d{1,3}$/.test(s)) s = s.padStart(4,'0');   // 数値セルで先頭0が落ちた場合
+  return s;
+}
+function normRate(v){
+  if (v == null || v === '') return null;
+  let n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[%％\s]/g,''));
+  if (isNaN(n)) return null;
+  if (n > 0 && n <= 1) n = n * 100;
+  return Math.round(n * 10) / 10;
+}
+function toNum(v){
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[^\d.]/g,''));
+  return isNaN(n) ? null : n;
+}
+
+/* シート（2次元配列）からヘッダー行を探して商品リストに変換 */
+function parseSheetRows(aoa){
+  let hi = -1, cols = null;
+  for (let i = 0; i < Math.min(aoa.length, 30); i++){
+    const r = (aoa[i] || []).map(c => String(c ?? '').replace(/\s/g,'').toUpperCase());
+    const find = re => r.findIndex(c => re.test(c));
+    const item = find(/ITEMNO|品番|ITEMCODE|STYLE/);
+    const color = find(/カラー|COLOR|COLOUR|色/);
+    const rate = find(/OFF/);
+    if (item >= 0 && color >= 0 && rate >= 0){
+      hi = i;
+      const sale = find(/SALE.*上代|セール.*価格|SALEPRICE/);
+      let price = r.findIndex((c,k) => /上代|定価|PRICE/.test(c) && k !== sale);
+      cols = { item, color, rate, sale, price,
+        name: find(/品名|NAME|商品名/), cat: find(/アイテム|CATEGORY/), gender: find(/ジェンダー|GENDER/),
+        note: find(/備考|NOTE/), ch: find(/展開|CHANNEL/) };
+      break;
+    }
+  }
+  if (hi < 0) return [];
+  const g = (row, k) => cols[k] >= 0 ? row[cols[k]] : null;
+  const out = [];
+  for (let i = hi + 1; i < aoa.length; i++){
+    const row = aoa[i] || [];
+    const item = String(g(row,'item') ?? '').trim().toUpperCase().replace(/\s/g,'');
+    const rate = normRate(g(row,'rate'));
+    if (!item || item.length < 5 || rate == null) continue;
+    const price = toNum(g(row,'price'));
+    let sale = toNum(g(row,'sale'));
+    if (sale == null && price != null) sale = Math.round(price * (1 - rate/100));
+    out.push({
+      item, color: normColor(g(row,'color')), rate, price, sale,
+      name: String(g(row,'name') ?? '').trim(), cat: String(g(row,'cat') ?? '').trim(),
+      gender: String(g(row,'gender') ?? '').trim(), note: String(g(row,'note') ?? '').trim(),
+      ch: String(g(row,'ch') ?? '').trim()
+    });
+  }
+  return out;
+}
+
+/* 照合用インデックス */
+function buildIndex(rows){
+  const byItem = new Map();
+  for (const r of rows){
+    if (!byItem.has(r.item)) byItem.set(r.item, []);
+    byItem.get(r.item).push(r);
+  }
+  const items = [...byItem.keys()].map(code => ({ code, key: canon(code), rows: byItem.get(code) }))
+    .sort((a,b) => b.key.length - a.key.length);   // 長い品番を優先
+  return { rows, byItem, items };
+}
+
+/* レーベンシュタイン距離（上限付き） */
+function lev(a, b, max){
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({length: b.length + 1}, (_, i) => i);
+  for (let i = 1; i <= a.length; i++){
+    const cur = [i]; let best = i;
+    for (let j = 1; j <= b.length; j++){
+      cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+      if (cur[j] < best) best = cur[j];
+    }
+    if (best > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/* OCRテキスト → 判定結果
+   返り値: {status:'hit'|'item'|'none', item, rows, color, picked, fuzzy}
+     hit  : 品番＋カラー特定（またはカラーに関係なくOFF率が同じ）
+     item : 品番は特定、カラー未特定でOFF率がカラーで異なる
+     none : リストにない／読めない */
+function matchText(text, idx){
+  const t = canon(text);
+  if (t.length < 5) return { status:'none', text:t };
+
+  // 1) 完全一致（混同文字は同一視）
+  let found = [];
+  for (const it of idx.items){
+    let p = t.indexOf(it.key);
+    while (p >= 0){ found.push({ it, start:p, end:p + it.key.length, fuzzy:false }); p = t.indexOf(it.key, p + 1); }
+  }
+  // 長い品番に内包される短い品番のヒットを除外
+  found = found.filter(f => !found.some(g => g !== f && g.it.key.length > f.it.key.length && g.start <= f.start && g.end >= f.end));
+
+  // 2) 1文字違いまで許容（10文字以上の品番のみ）
+  if (!found.length){
+    for (const it of idx.items){
+      const L = it.key.length; if (L < 10) continue;
+      for (const w of [L, L-1, L+1]){
+        for (let p = 0; p + w <= t.length; p++){
+          if (lev(t.substr(p, w), it.key, 1) <= 1){ found.push({ it, start:p, end:p + w, fuzzy:true }); break; }
+        }
+      }
+    }
+  }
+  if (!found.length) return { status:'none', text:t };
+
+  // 品番ごとにまとめる
+  const uniq = [...new Map(found.map(f => [f.it.code, f])).values()];
+  // 複数品番が読めた場合は完全一致・長い方を優先
+  uniq.sort((a,b) => (a.fuzzy - b.fuzzy) || (b.it.key.length - a.it.key.length));
+  const f = uniq[0];
+  const rows = f.it.rows;
+
+  // カラー判定：品番の直後 → 直前 → テキスト全体 の順で探す
+  const hits = f0 => rows.filter(r => f0(canon(r.color)));
+  const after = t.slice(f.end, f.end + 10);
+  const before = t.slice(Math.max(0, f.start - 8), f.start);
+  const rest = t.slice(0, f.start) + '|' + t.slice(f.end);
+  let cand = hits(k => after.startsWith(k));
+  if (cand.length !== 1) cand = hits(k => after.includes(k));
+  if (cand.length !== 1) cand = hits(k => before.includes(k));
+  if (cand.length !== 1) cand = hits(k => rest.includes(k));
+
+  const rates = new Set(rows.map(r => r.rate));
+  if (cand.length === 1) return { status:'hit', item:f.it.code, rows, picked:cand[0], color:cand[0].color, fuzzy:f.fuzzy, text:t };
+  if (rates.size === 1)  return { status:'hit', item:f.it.code, rows, picked: rows.length === 1 ? rows[0] : null, color:null, fuzzy:f.fuzzy, text:t };
+  return { status:'item', item:f.it.code, rows, picked:null, color:null, fuzzy:f.fuzzy, text:t };
+}
+
+/* 手動検索 */
+function searchRows(q, idx, limit = 30){
+  const k = canon(q); if (k.length < 2) return [];
+  const raw = String(q).toUpperCase().trim();
+  return idx.rows.filter(r => canon(r.item + r.color).includes(k) || canon(r.color) === k || (raw.length >= 3 && r.name.toUpperCase().includes(raw)))
+    .slice(0, limit);
+}
+
+if (typeof module !== 'undefined') module.exports = { canon, parseSheetRows, buildIndex, matchText, searchRows, normRate, normColor };
+</script>
+
+<!-- ============ APP（UI・カメラ・OCR） ============ -->
+<script>
+const $ = s => document.querySelector(s);
+const LS_KEY = 'mkSaleScanner.data.v2', HIST_KEY = 'mkSaleScanner.hist.v2';
+let IDX = null, DATA_META = null;
+let stream = null, track = null, scanning = false, worker = null, workerReady = null, torchOn = false;
+let lastFuzzy = null;
+
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 2200); }
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const yen = n => n == null ? '-' : '¥' + Math.round(n).toLocaleString();
+const pct = n => (Number.isInteger(n) ? n : n.toFixed(1));
+
+/* ---------- データ読込 ---------- */
+function setData(rows, meta){
+  IDX = buildIndex(rows); DATA_META = meta;
+  const c = $('#dataChip');
+  c.textContent = `${meta.name}｜${IDX.items.length}品番 ${rows.length}色`;
+  c.classList.add('ok');
+  $('#btnLoad').textContent = '📄 Excelを読み込み直す';
+  $('#btnLoad').classList.remove('primary');
+}
+try {
+  const saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+  if (saved && saved.rows?.length) setData(saved.rows, saved.meta);
+} catch(e){}
+
+function loadMsg(m, err){ const e = $('#loadMsg'); e.textContent = m; e.classList.toggle('err', !!err); }
+function loadScript(src){
+  return new Promise((ok, ng) => { const t = document.createElement('script'); t.src = src;
+    t.onload = ok; t.onerror = () => ng(new Error(src)); document.head.appendChild(t); });
+}
+let xlsxReady = null;
+function getXLSX(){
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (!xlsxReady) xlsxReady = (async () => {
+    const srcs = ['https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+                  'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js',
+                  'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js'];
+    for (const u of srcs){ try { await loadScript(u); if (window.XLSX) return window.XLSX; } catch(e){} }
+    xlsxReady = null;
+    throw new Error('Excel読込ライブラリを取得できませんでした。電波を確認して再度お試しください');
+  })();
+  return xlsxReady;
+}
+getXLSX().catch(() => {});   // 先読み
+function readBuf(file){
+  if (file.arrayBuffer) return file.arrayBuffer();
+  return new Promise((ok, ng) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => ng(r.error); r.readAsArrayBuffer(file); });
+}
+const openPicker = () => $('#xlsx').click();
+$('#btnLoad').addEventListener('click', openPicker);
+$('#dataChip').addEventListener('click', openPicker);
+
+$('#xlsx').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  loadMsg(`読み込み中…（${file.name}）`);
+  try {
+    if (!/\.(xlsx|xlsm|xls|csv)$/i.test(file.name)) throw new Error(`Excelファイルではないようです（${file.name}）`);
+    const X = await getXLSX();
+    const buf = await readBuf(file);
+    let wb;
+    try { wb = X.read(new Uint8Array(buf), { type:'array' }); }
+    catch(err){
+      throw new Error(/password|encrypt|CFB|ECMA/i.test(err.message)
+        ? 'パスワード／保護付きのファイルは読めません。保護を外して保存し直してください'
+        : 'ファイルを開けませんでした：' + err.message);
+    }
+    let rows = [];
+    for (const name of wb.SheetNames){
+      const aoa = X.utils.sheet_to_json(wb.Sheets[name], { header:1, raw:true, defval:null });
+      rows = rows.concat(parseSheetRows(aoa));
+    }
+    if (!rows.length) throw new Error(`「ITEMNO」「カラー」「OFF率」の列が見つかりません（シート：${wb.SheetNames.join(', ')}）`);
+    const meta = { name: file.name.replace(/\.[^.]+$/,''), at: new Date().toISOString() };
+    setData(rows, meta);
+    try { localStorage.setItem(LS_KEY, JSON.stringify({ rows, meta })); } catch(e){}
+    loadMsg(`✓ ${rows.length}件読み込みました`);
+    toast(`${rows.length}件読み込みました`);
+  } catch(err){ console.error(err); loadMsg(err.message || String(err), true); }
+});
+
+/* ---------- OCR ---------- */
+function initWorker(){
+  if (workerReady) return workerReady;
+  workerReady = (async () => {
+    if (typeof Tesseract === 'undefined') throw new Error('OCRライブラリを取得できません（通信を確認）');
+    setCamMsg('OCRを準備中…（初回は数秒かかります）');
+    worker = await Tesseract.createWorker('eng', 1);
+    await worker.setParameters({
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/ ',
+      tessedit_pageseg_mode: '11',   // 疎なテキスト（タグ向き）
+    });
+    return worker;
+  })();
+  workerReady.catch(() => { workerReady = null; });
+  return workerReady;
+}
+
+/* 画像の一部を切り出してOCR向けに前処理 */
+function prepCanvas(src, sx, sy, sw, sh){
+  const scale = Math.min(2.5, Math.max(1, 1400 / sw));
+  const c = document.createElement('canvas');
+  c.width = Math.round(sw * scale); c.height = Math.round(sh * scale);
+  const g = c.getContext('2d', { willReadFrequently:true });
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(src, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  const im = g.getImageData(0, 0, c.width, c.height), d = im.data;
+  let min = 255, max = 0;
+  for (let i = 0; i < d.length; i += 4){
+    const y = d[i]*.299 + d[i+1]*.587 + d[i+2]*.114; d[i] = y;
+    if (y < min) min = y; if (y > max) max = y;
+  }
+  const k = 255 / Math.max(1, max - min);
+  for (let i = 0; i < d.length; i += 4){ const v = (d[i] - min) * k; d[i] = d[i+1] = d[i+2] = v; }
+  g.putImageData(im, 0, 0);
+  return c;
+}
+
+/* 表示中の枠（object-fit:cover考慮）→ 動画の画素座標 */
+function guideCrop(){
+  const v = $('#video'), box = $('#cam').getBoundingClientRect(), gr = $('#guide').getBoundingClientRect();
+  const vw = v.videoWidth, vh = v.videoHeight;
+  const s = Math.max(box.width / vw, box.height / vh);
+  const ox = (vw * s - box.width) / 2, oy = (vh * s - box.height) / 2;
+  const pad = 0.04 * box.width;   // 少し広めに切り出す
+  let x = (gr.left - box.left - pad + ox) / s, y = (gr.top - box.top - pad + oy) / s;
+  let w = (gr.width + pad*2) / s, h = (gr.height + pad*2) / s;
+  x = Math.max(0, x); y = Math.max(0, y); w = Math.min(vw - x, w); h = Math.min(vh - y, h);
+  return [x, y, w, h];
+}
+
+async function ocr(canvas){
+  const w = await initWorker();
+  const { data } = await w.recognize(canvas);
+  return data.text || '';
+}
+
+/* ---------- カメラ ---------- */
+function setCamMsg(m){ $('#camMsg').textContent = m || ''; }
+
+async function startCamera(){
+  if (!IDX){ loadMsg('先にExcelデータを読み込んでください', true); return; }
+  let framed = false; try { framed = window.self !== window.top; } catch(e){ framed = true; }
+  if (framed){ toast('アプリ内プレビューではカメラが使えません。SafariでURLを開いてください'); return; }
+  if (!window.isSecureContext){ toast('https:// で開いてください（カメラはhttpでは動きません）'); return; }
+  if (!navigator.mediaDevices?.getUserMedia){ toast('このブラウザはカメラ非対応です。「写真で読取」を使ってください'); return; }
+  const btn = $('#btnCam'); btn.disabled = true;
+  try {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio:false,
+        video:{ facingMode:{ ideal:'environment' }, width:{ ideal:1920 }, height:{ ideal:1080 } } });
+    } catch(e){
+      if (e.name === 'NotAllowedError' || e.name === 'SecurityError') throw e;
+      stream = await navigator.mediaDevices.getUserMedia({ audio:false, video:{ facingMode:'environment' } });
+    }
+    const v = $('#video');
+    v.srcObject = stream;
+    v.setAttribute('playsinline',''); v.muted = true;
+    await new Promise(r => v.readyState >= 1 ? r() : v.addEventListener('loadedmetadata', r, { once:true }));
+    await v.play();
+    track = stream.getVideoTracks()[0];
+    try {
+      const cap = track.getCapabilities?.() || {};
+      $('#btnTorch').disabled = !cap.torch;
+      if (cap.focusMode?.includes('continuous')) await track.applyConstraints({ advanced:[{ focusMode:'continuous' }] });
+    } catch(e){}
+    $('#camIdle').style.display = 'none';
+    btn.textContent = 'カメラ停止'; btn.classList.remove('primary');
+    scanning = true; lastFuzzy = null;
+    initWorker().catch(err => { toast(err.message); stopCamera(); });
+    loop();
+  } catch(e){
+    console.error(e);
+    const m = e.name === 'NotAllowedError' ? 'カメラが許可されていません。設定 > Safari > カメラ を「許可」にしてください'
+            : e.name === 'NotFoundError' ? 'カメラが見つかりません'
+            : e.name === 'NotReadableError' ? '他のアプリがカメラを使用中です'
+            : 'カメラを起動できませんでした（' + e.name + '）';
+    toast(m); setCamMsg(''); stopCamera();
+  } finally { btn.disabled = false; }
+}
+
+function stopCamera(){
+  scanning = false;
+  if (stream){ stream.getTracks().forEach(t => t.stop()); stream = null; track = null; }
+  $('#video').srcObject = null;
+  $('#camIdle').style.display = ''; setCamMsg('');
+  $('#btnTorch').disabled = true; torchOn = false;
+  const b = $('#btnCam'); b.textContent = 'カメラ開始'; b.classList.add('primary');
+}
+
+async function loop(){
+  const v = $('#video');
+  while (scanning){
+    if (!v.videoWidth){ await sleep(150); continue; }
+    try {
+      await initWorker();
+      setCamMsg('読み取り中… 品番とカラーを枠に入れてください');
+      const [x,y,w,h] = guideCrop();
+      const text = await ocr(prepCanvas(v, x, y, w, h));
+      if (!scanning) break;
+      const res = matchText(text, IDX);
+      if (res.status === 'none') { lastFuzzy = null; continue; }
+      // あいまい一致は2回連続で同じ結果のときだけ確定
+      if (res.fuzzy){
+        const key = res.item + '|' + (res.color || '');
+        if (lastFuzzy !== key){ lastFuzzy = key; continue; }
+      }
+      onFound(res, true);
+      if (res.status === 'hit'){ pauseScan(); break; }
+    } catch(e){ console.error(e); await sleep(500); }
+  }
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function pauseScan(){
+  scanning = false;
+  $('#guide').classList.add('hit');
+  setCamMsg('読み取りました ✓ 画面をタップで次のスキャン');
+  try { navigator.vibrate?.(60); } catch(e){}
+}
+$('#cam').addEventListener('click', () => {
+  if (stream && !scanning){ $('#guide').classList.remove('hit'); scanning = true; lastFuzzy = null; loop(); }
+});
+
+$('#btnCam').addEventListener('click', () => stream ? stopCamera() : startCamera());
+$('#btnTorch').addEventListener('click', async () => {
+  if (!track) return;
+  try { torchOn = !torchOn; await track.applyConstraints({ advanced:[{ torch:torchOn }] }); $('#btnTorch').textContent = torchOn ? 'ライトOFF' : 'ライト'; }
+  catch(e){ toast('ライトを使えません'); }
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden && stream) stopCamera(); });
+
+/* ---------- 写真で読取（カメラが動かない時の保険） ---------- */
+$('#photo').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  if (!IDX){ toast('先にExcelデータを読み込んでください'); return; }
+  showResult('<div class="meta">読み取り中…</div>');
+  try {
+    const img = await createImageBitmap(file);
+    const text = await ocr(prepCanvas(img, 0, 0, img.width, img.height));
+    const res = matchText(text, IDX);
+    onFound(res, true);
+  } catch(err){ console.error(err); showResult('<div class="none">読み取りに失敗しました</div>'); }
+});
+
+/* ---------- 結果表示 ---------- */
+function showResult(html){ const r = $('#result'); r.innerHTML = html; r.classList.add('show'); }
+
+function rateBlock(r){
+  return `<div class="rate">${pct(r.rate)}<small>% OFF</small></div>
+    <div class="price"><s>${yen(r.price)}</s><b>${yen(r.sale)}</b></div>`;
+}
+function tags(r){
+  let h = '';
+  if (r.ch) h += `<span class="tag ${/不可|ECのみ/.test(r.ch) ? 'warn' : 'info'}">${esc(r.ch)}</span>`;
+  if (r.note) h += `<span class="tag info">${esc(r.note)}</span>`;
+  return h;
+}
+
+function onFound(res, addHist){
+  if (res.status === 'none'){
+    showResult(`<div class="none">リストに該当なし</div>
+      <div class="meta">セール対象外か、品番が読めていません。手動検索でも確認できます。</div>
+      <div class="raw">読取: ${esc(res.text || '-')}</div>`);
+    return;
+  }
+  const rows = res.rows, first = rows[0], p = res.picked;
+  let h = '';
+  if (res.status === 'hit'){
+    const r = p || first;
+    h += rateBlock(r);
+    h += `<div class="meta"><span class="code">${esc(res.item)}${p ? ' / ' + esc(p.color) : ''}</span><br>${esc(first.name)}</div>`;
+    h += tags(r);
+    if (!p && rows.length > 1) h += `<div class="meta">※カラーは読めませんでしたが、全カラー同じOFF率です</div>`;
+  } else {
+    h += `<div class="none" style="color:var(--warn)">カラーを確認してください</div>
+      <div class="meta"><span class="code">${esc(res.item)}</span><br>${esc(first.name)}<br>この品番はカラーによってOFF率が違います</div>`;
+  }
+  if (rows.length > 1){
+    h += '<div class="colors">' + rows.map(r =>
+      `<div class="crow ${p && p.color === r.color ? 'sel' : ''}"><span>カラー ${esc(r.color)} <span class="nm">${yen(r.sale)}${r.ch ? '｜' + esc(r.ch) : ''}</span></span><span class="r">${pct(r.rate)}%</span></div>`).join('') + '</div>';
+  }
+  if (res.fuzzy) h += `<div class="meta">※1文字違いで一致。念のためタグの品番と見比べてください</div>`;
+  showResult(h);
+  if (addHist) pushHist(p || (res.status === 'hit' ? first : null), res);
+}
+
+/* ---------- 手動検索 ---------- */
+$('#q').addEventListener('input', e => {
+  const box = $('#qList');
+  if (!IDX){ box.innerHTML = '<div class="empty">データ未読込</div>'; return; }
+  const list = searchRows(e.target.value, IDX);
+  if (!e.target.value.trim()){ box.innerHTML = ''; return; }
+  box.innerHTML = list.length ? list.map((r,i) =>
+    `<div class="crow" data-i="${i}"><span><span class="code">${esc(r.item)} ${esc(r.color)}</span><span class="nm">${esc(r.name)}</span></span><span class="r">${pct(r.rate)}%</span></div>`).join('')
+    : '<div class="empty">該当なし</div>';
+  box.querySelectorAll('.crow').forEach(el => el.addEventListener('click', () => {
+    const r = list[+el.dataset.i];
+    onFound({ status:'hit', item:r.item, rows:IDX.byItem.get(r.item), picked:r, color:r.color }, true);
+    window.scrollTo({ top:0, behavior:'smooth' });
+  }));
+});
+
+/* ---------- 履歴 ---------- */
+function pushHist(r, res){
+  let h = []; try { h = JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch(e){}
+  const entry = { item: res.item, color: r ? r.color : '?', rate: r ? r.rate : null, name: res.rows[0].name, t: Date.now() };
+  if (h[0] && h[0].item === entry.item && h[0].color === entry.color) return renderHist(h);
+  h.unshift(entry); h = h.slice(0, 20);
+  try { localStorage.setItem(HIST_KEY, JSON.stringify(h)); } catch(e){}
+  renderHist(h);
+}
+function renderHist(h){
+  if (!h){ try { h = JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch(e){ h = []; } }
+  $('#hist').innerHTML = h.length ? h.map(x => {
+    const tm = new Date(x.t); const hh = `${tm.getHours()}:${String(tm.getMinutes()).padStart(2,'0')}`;
+    return `<div class="crow"><span><span class="code">${esc(x.item)} ${esc(x.color)}</span><span class="nm">${hh}｜${esc(x.name)}</span></span><span class="r">${x.rate == null ? '要確認' : pct(x.rate) + '%'}</span></div>`;
+  }).join('') : '<div class="empty">まだありません</div>';
+}
+renderHist();
+</script>
+</body>
+</html>
