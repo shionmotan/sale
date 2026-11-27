@@ -219,8 +219,9 @@ function lev(a, b, max){
 
 /* OCRテキスト → 判定結果
    返り値: {status:'hit'|'item'|'none', item, rows, color, picked, fuzzy}
-     hit  : 品番＋カラー特定（またはカラーに関係なくOFF率が同じ）
-     item : 品番は特定、カラー未特定でOFF率がカラーで異なる
+     hit  : 品番＋カラー特定（リストにあるカラー）
+     off  : 品番はリストにあるが、読めたカラーは対象外
+     item : 品番は特定、カラーがまだ読めていない
      none : リストにない／読めない */
 function matchText(text, idx){
   const t = canon(text);
@@ -248,27 +249,32 @@ function matchText(text, idx){
   }
   if (!found.length) return { status:'none', text:t };
 
-  // 品番ごとにまとめる
-  const uniq = [...new Map(found.map(f => [f.it.code, f])).values()];
-  // 複数品番が読めた場合は完全一致・長い方を優先
-  uniq.sort((a,b) => (a.fuzzy - b.fuzzy) || (b.it.key.length - a.it.key.length));
-  const f = uniq[0];
-  const rows = f.it.rows;
+  // 品番ごとにまとめる（同じ品番が複数箇所に出ることがある：上段の No. と下段のバーコード上）
+  found.sort((a,b) => (a.fuzzy - b.fuzzy) || (b.it.key.length - a.it.key.length));
+  const f = found[0], it = f.it, rows = it.rows;
+  const spots = found.filter(g => g.it === it);
+  const fuzzy = spots.every(g => g.fuzzy);
 
-  // カラー判定：品番の直後 → 直前 → テキスト全体 の順で探す
-  const hits = f0 => rows.filter(r => f0(canon(r.color)));
-  const after = t.slice(f.end, f.end + 10);
-  const before = t.slice(Math.max(0, f.start - 8), f.start);
-  const rest = t.slice(0, f.start) + '|' + t.slice(f.end);
-  let cand = hits(k => after.startsWith(k));
-  if (cand.length !== 1) cand = hits(k => after.includes(k));
-  if (cand.length !== 1) cand = hits(k => before.includes(k));
-  if (cand.length !== 1) cand = hits(k => rest.includes(k));
+  // タグに印字されたカラーを読む：「Col.」の後ろ → 品番の直後 の順
+  // （canon後は COL → C01。カラーは 0447 / P199 / H123 のような 英数1文字＋数字3桁）
+  const CODE = '([A-Z0-9][0-9]{3})(?![0-9])';
+  const seen = [];
+  for (const m of t.matchAll(new RegExp('C01' + CODE, 'g'))) seen.push(m[1]);
+  for (const g of spots){
+    const m = t.slice(g.end).match(new RegExp('^' + CODE));
+    if (m) seen.push(m[1]);
+  }
+  const listed = new Map(rows.map(r => [canon(r.color), r]));
+  const base = { item: it.code, rows, fuzzy, text: t };
 
-  const rates = new Set(rows.map(r => r.rate));
-  if (cand.length === 1) return { status:'hit', item:f.it.code, rows, picked:cand[0], color:cand[0].color, fuzzy:f.fuzzy, text:t };
-  if (rates.size === 1)  return { status:'hit', item:f.it.code, rows, picked: rows.length === 1 ? rows[0] : null, color:null, fuzzy:f.fuzzy, text:t };
-  return { status:'item', item:f.it.code, rows, picked:null, color:null, fuzzy:f.fuzzy, text:t };
+  const okColor = seen.find(c => listed.has(c));
+  if (okColor){ const r = listed.get(okColor); return { ...base, status:'hit', picked:r, color:r.color }; }
+  if (seen.length){
+    // 読めたカラーがリストにない → 対象外（rowsの他カラーとして表示しない）
+    const raw = String(text).toUpperCase().match(new RegExp('C[O0]L\\.?\\s*([A-Z0-9][0-9OIL]{3})')) ;
+    return { ...base, status:'off', picked:null, color: raw ? raw[1] : seen[0] };
+  }
+  return { ...base, status:'item', picked:null, color:null };
 }
 
 /* 手動検索 */
@@ -487,21 +493,22 @@ async function loop(){
       const res = matchText(text, IDX);
       if (res.status === 'none') { lastFuzzy = null; continue; }
       // あいまい一致は2回連続で同じ結果のときだけ確定
-      if (res.fuzzy){
+      if (res.status === 'item'){ onFound(res, false); setCamMsg('品番OK・カラーを読み取り中… Col. の部分も枠に入れてください'); lastFuzzy = null; continue; }
+      if (res.fuzzy || res.status === 'off'){
         const key = res.item + '|' + (res.color || '');
         if (lastFuzzy !== key){ lastFuzzy = key; continue; }
       }
       onFound(res, true);
-      if (res.status === 'hit'){ pauseScan(); break; }
+      pauseScan(res.status); break;
     } catch(e){ console.error(e); await sleep(500); }
   }
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function pauseScan(){
+function pauseScan(st){
   scanning = false;
   $('#guide').classList.add('hit');
-  setCamMsg('読み取りました ✓ 画面をタップで次のスキャン');
+  setCamMsg((st === 'off' ? 'カラー対象外 ✕' : '読み取りました ✓') + ' 画面をタップで次のスキャン');
   try { navigator.vibrate?.(60); } catch(e){}
 }
 $('#cam').addEventListener('click', () => {
@@ -552,24 +559,25 @@ function onFound(res, addHist){
     return;
   }
   const rows = res.rows, first = rows[0], p = res.picked;
+  const colorList = withRate => '<div class="colors">' + rows.map(r =>
+      `<div class="crow ${p && p.color === r.color ? 'sel' : ''}"><span>カラー ${esc(r.color)}${withRate ? ` <span class="nm">${yen(r.sale)}${r.ch ? '｜' + esc(r.ch) : ''}</span>` : ''}</span>${withRate ? `<span class="r">${pct(r.rate)}%</span>` : ''}</div>`).join('') + '</div>';
   let h = '';
   if (res.status === 'hit'){
-    const r = p || first;
-    h += rateBlock(r);
-    h += `<div class="meta"><span class="code">${esc(res.item)}${p ? ' / ' + esc(p.color) : ''}</span><br>${esc(first.name)}</div>`;
-    h += tags(r);
-    if (!p && rows.length > 1) h += `<div class="meta">※カラーは読めませんでしたが、全カラー同じOFF率です</div>`;
+    h += rateBlock(p);
+    h += `<div class="meta"><span class="code">${esc(res.item)} / ${esc(p.color)}</span><br>${esc(first.name)}</div>`;
+    h += tags(p);
+  } else if (res.status === 'off'){
+    h += `<div class="none">このカラーは対象外</div>
+      <div class="meta"><span class="code">${esc(res.item)} / ${esc(res.color)}</span><br>${esc(first.name)}<br>対象カラーは下記のみです（タグのCol.と見比べてください）</div>`;
+    h += colorList(false);
   } else {
-    h += `<div class="none" style="color:var(--warn)">カラーを確認してください</div>
-      <div class="meta"><span class="code">${esc(res.item)}</span><br>${esc(first.name)}<br>この品番はカラーによってOFF率が違います</div>`;
+    h += `<div class="none" style="color:var(--warn)">カラーを確認中…</div>
+      <div class="meta"><span class="code">${esc(res.item)}</span><br>${esc(first.name)}<br>タグのCol.が下記にあれば対象です</div>`;
+    h += colorList(true);
   }
-  if (rows.length > 1){
-    h += '<div class="colors">' + rows.map(r =>
-      `<div class="crow ${p && p.color === r.color ? 'sel' : ''}"><span>カラー ${esc(r.color)} <span class="nm">${yen(r.sale)}${r.ch ? '｜' + esc(r.ch) : ''}</span></span><span class="r">${pct(r.rate)}%</span></div>`).join('') + '</div>';
-  }
-  if (res.fuzzy) h += `<div class="meta">※1文字違いで一致。念のためタグの品番と見比べてください</div>`;
+  if (res.fuzzy) h += `<div class="meta">※品番は1文字違いで一致。念のためタグと見比べてください</div>`;
   showResult(h);
-  if (addHist) pushHist(p || (res.status === 'hit' ? first : null), res);
+  if (addHist && res.status !== 'item') pushHist(p, res);
 }
 
 /* ---------- 手動検索 ---------- */
@@ -591,7 +599,7 @@ $('#q').addEventListener('input', e => {
 /* ---------- 履歴 ---------- */
 function pushHist(r, res){
   let h = []; try { h = JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch(e){}
-  const entry = { item: res.item, color: r ? r.color : '?', rate: r ? r.rate : null, name: res.rows[0].name, t: Date.now() };
+  const entry = { item: res.item, color: r ? r.color : (res.color || '?'), rate: r ? r.rate : null, off: res.status === 'off', name: res.rows[0].name, t: Date.now() };
   if (h[0] && h[0].item === entry.item && h[0].color === entry.color) return renderHist(h);
   h.unshift(entry); h = h.slice(0, 20);
   try { localStorage.setItem(HIST_KEY, JSON.stringify(h)); } catch(e){}
@@ -601,7 +609,7 @@ function renderHist(h){
   if (!h){ try { h = JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch(e){ h = []; } }
   $('#hist').innerHTML = h.length ? h.map(x => {
     const tm = new Date(x.t); const hh = `${tm.getHours()}:${String(tm.getMinutes()).padStart(2,'0')}`;
-    return `<div class="crow"><span><span class="code">${esc(x.item)} ${esc(x.color)}</span><span class="nm">${hh}｜${esc(x.name)}</span></span><span class="r">${x.rate == null ? '要確認' : pct(x.rate) + '%'}</span></div>`;
+    return `<div class="crow"><span><span class="code">${esc(x.item)} ${esc(x.color)}</span><span class="nm">${hh}｜${esc(x.name)}</span></span><span class="r">${x.off ? '対象外' : x.rate == null ? '要確認' : pct(x.rate) + '%'}</span></div>`;
   }).join('') : '<div class="empty">まだありません</div>';
 }
 renderHist();
