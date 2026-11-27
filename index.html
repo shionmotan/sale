@@ -568,8 +568,8 @@ function onFound(res, addHist){
     h += tags(p);
   } else if (res.status === 'off'){
     h += `<div class="none">このカラーは対象外</div>
-      <div class="meta"><span class="code">${esc(res.item)} / ${esc(res.color)}</span><br>${esc(first.name)}<br>対象カラーは下記のみです（タグのCol.と見比べてください）</div>`;
-    h += colorList(false);
+      <div class="meta"><span class="code">${esc(res.item)} / ${esc(res.color)}</span><br>${esc(first.name)}<br>対象カラーと各OFF率は下記です（タグのCol.と見比べてください）</div>`;
+    h += colorList(true);
   } else {
     h += `<div class="none" style="color:var(--warn)">カラーを確認中…</div>
       <div class="meta"><span class="code">${esc(res.item)}</span><br>${esc(first.name)}<br>タグのCol.が下記にあれば対象です</div>`;
